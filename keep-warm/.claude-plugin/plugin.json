@@ -1,0 +1,1 @@
+{ "name": "keep-warm", "version": "0.3.2", "description": "Keeps the 5-minute prompt cache warm while the session is idle or waiting inside a tool call, for up to 30 minutes, with a live cache countdown above the prompt", "license": "MIT", "types": "./types/index.d.ts" }

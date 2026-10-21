@@ -1,0 +1,9 @@
+{
+  "name": "cc-cache-mods",
+  "description": "Claude Code mods that keep the prompt cache warm and flag cache misses",
+  "owner": { "name": "Hans-Martin Schmargendorf" },
+  "plugins": [
+    { "name": "context-meter", "source": "./context-meter" },
+    { "name": "keep-warm", "source": "./keep-warm" }
+  ]
+}

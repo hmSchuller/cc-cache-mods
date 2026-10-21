@@ -1,0 +1,1 @@
+{ "name": "context-meter", "version": "0.1.0", "description": "Toasts when context passes 100k/150k/200k and on prompt-cache misses", "license": "MIT", "types": "./types/index.d.ts" }
