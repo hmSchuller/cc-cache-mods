@@ -127,15 +127,43 @@ async function halt($: Engine, w: Warm) {
   await update($, cache, () => null)
 }
 
+// Lets the cache lapse: retires the pending ping and keeps only the countdown running.
+async function letCool($: Engine, w: Warm) {
+  w.runs += 1
+  w.timer?.cancel()
+  w.timer = undefined
+  $.ui.status(undefined)
+  await update($, cache, c => c && { ...c, keepWarmUntil: null })
+}
+
 export const register: Register = on => {
   const w: Warm = { idleSince: 0, pings: 0, cachedK: 0, runs: 0 }
   // When the main loop last sent a model request; the cache TTL counts from here.
   let lastRequestAt: number | undefined
   // Main-loop tool calls in flight; parallel calls share one keep-warm run.
   let toolsRunning = 0
+  // Set by /let-cool; the next message from the person clears it and keep-warm resumes.
+  let isCooling = false
+
+  on('session.start', async ($, e, next) => {
+    await $.command.register({
+      name: 'let-cool',
+      description: 'Stop keep-warm pings; the cache goes cold, and the next message resumes keep-warm',
+    })
+
+    return next(e)
+  })
+
+  on('command.run', { command: 'let-cool' }, async $ => {
+    isCooling = true
+    await letCool($, w)
+
+    return { text: 'Keep-warm paused. The cache goes cold within 5 minutes; your next message resumes it.' }
+  })
 
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
+      isCooling = false
       toolsRunning = 0
       await halt($, w)
     }
@@ -154,7 +182,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
 
-    if (e.agentId === undefined) {
+    if (e.agentId === undefined && !isCooling) {
       await keepWarm($, w, lastRequestAt ?? (await $.clock.now()))
     }
 
@@ -170,7 +198,7 @@ export const register: Register = on => {
 
     toolsRunning += 1
 
-    if (toolsRunning === 1) {
+    if (toolsRunning === 1 && !isCooling) {
       await keepWarm($, w, lastRequestAt ?? (await $.clock.now()))
     }
 
