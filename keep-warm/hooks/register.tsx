@@ -140,8 +140,8 @@ export const register: Register = on => {
   const w: Warm = { idleSince: 0, pings: 0, cachedK: 0, runs: 0 }
   // When the main loop last sent a model request; the cache TTL counts from here.
   let lastRequestAt: number | undefined
-  // Main-loop tool calls in flight; parallel calls share one keep-warm run.
-  let toolsRunning = 0
+  // The main loop's current turn, so only its own requests move keep-warm.
+  let mainTurnId: string | undefined
   // Set by /let-cool; the next message from the person clears it and keep-warm resumes.
   let isCooling = false
 
@@ -162,21 +162,36 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
+    const started = await next(e)
+
     if (e.agentId === undefined) {
+      mainTurnId = started.turnId
       isCooling = false
-      toolsRunning = 0
       await halt($, w)
     }
 
-    return next(e)
+    return started
   })
 
+  // Between two requests of a turn the main loop waits inside its tool calls (a question to
+  // the person, a permission prompt, a long tool or subagent) and sends nothing, so keep warm
+  // from each response until the next request. Watching the steps, not the tool calls, keeps
+  // keep-warm out of every tool's path, so Code Mode and backgrounded tools stay available.
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId === undefined) {
+    const isMain = e.agentId === undefined && e.turnId === mainTurnId
+
+    if (isMain) {
       lastRequestAt = await $.clock.now()
+      await halt($, w)
     }
 
-    return yield* next(e)
+    const response = yield* next(e)
+
+    if (isMain && !isCooling) {
+      await keepWarm($, w, lastRequestAt ?? (await $.clock.now()))
+    }
+
+    return response
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -187,30 +202,6 @@ export const register: Register = on => {
     }
 
     return done
-  })
-
-  // A turn waits inside a tool call (a question to the person, a permission prompt, a long
-  // tool or subagent) without sending requests, so keep warm there as when the turn is done.
-  on('tool.call', async ($, e, next) => {
-    if (e.agentId !== undefined) {
-      return next(e)
-    }
-
-    toolsRunning += 1
-
-    if (toolsRunning === 1 && !isCooling) {
-      await keepWarm($, w, lastRequestAt ?? (await $.clock.now()))
-    }
-
-    try {
-      return await next(e)
-    } finally {
-      toolsRunning -= 1
-
-      if (toolsRunning === 0) {
-        await halt($, w)
-      }
-    }
   })
 
   on('session.end', ($, e, next) => {

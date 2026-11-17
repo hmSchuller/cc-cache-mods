@@ -10,9 +10,9 @@ const setup = async ($: any, on: any) => {
   on('ui.log', () => ({ value: undefined }))
   on('command.register', () => ({ value: { command: 'let-cool' } }))
   on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
-  on('turn.start', (_: unknown, e: any) => e)
-  on('turn.step', async function* () {
-    return {}
+  on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
+  on('turn.step', async function* (_: unknown, e: any) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [] }
   })
   on('turn.complete', () => ({ text: 'done' }))
   on('model.fork', () => {
@@ -63,4 +63,25 @@ test('the next message resumes keep-warm', async ($, on) => {
   await clock.advance(5 * MIN)
 
   expect(pings()).toBeGreaterThan(0)
+})
+
+test('keeps warm while the main loop waits inside a tool call', async ($, on) => {
+  const { clock, pings } = await setup($, on)
+  await $.turn.start({ text: 'hi', turnId: 't' })
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 })) {
+    // drain the stream
+  }
+  await clock.advance(5 * MIN)
+
+  expect(pings()).toBeGreaterThan(0)
+})
+
+test('a request of the turn stops the pings', async ($, on) => {
+  const { clock, pings } = await setup($, on)
+  await runTurn($)
+  await $.turn.start({ text: 'again', turnId: 'u' })
+  const before = pings()
+  await clock.advance(10 * MIN)
+
+  expect(pings()).toBe(before)
 })
